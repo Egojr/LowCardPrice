@@ -2,6 +2,7 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 from datetime import datetime
 import csv
+import time
 
 # Convert Japanese shop names to English
 romaji = {
@@ -43,7 +44,7 @@ outputfile = "pricelist" + datetime.today().strftime('%Y-%m-%d') + ".csv"
 def lowCardPrice():
     # Read input files
     with open(cardfile) as f:
-        cards = f.read().splitlines()
+        cards = [line for line in f.read().splitlines() if line.strip() and not line.startswith('#')]
 
     with open(shopfile, 'r', encoding='utf-8') as f:                                                                    # Ensure shop name is also in romaji dict
         shops = f.read().splitlines()
@@ -75,29 +76,42 @@ def lowCardPrice():
             card_dict = {"Card Name": card}
 
             url = urlHeader + str(card) + urlFooter
-            driver.get(url)
-            content = driver.page_source
-            soup = BeautifulSoup(content, 'html.parser')
-            table = soup.find("table", class_="table-main")
+            page = 1
+            while True:
+                page_url = url + "&page=" + str(page) + "#ptable" if page > 1 else url
+                driver.get(page_url)
+                time.sleep(5)
+                content = driver.page_source
+                soup = BeautifulSoup(content, 'html.parser')
+                table = soup.find("table", class_="table-main")
 
-            if not table:
-                print("Error scraping {}".format(card))
-                errCount+=1
-                continue
-
-            for row in table.find_all('tr'):
-                cols = row.find_all('td')
-                cols = [ele.text.strip() for ele in cols]
-
-                if len(cols) > 0:
-                    try:
-                        if cols[shopname] in shops:
-                            key = romaji[cols[shopname]] + "_" + cols[lang]
-                            if key not in card_dict:                                                                    # Do not add duplicates (only add lowest price)
-                                p = int(cols[price].split()[0].replace(',', ''))                                        # Remove yen sign and commas
-                                card_dict[key] = p
-                    except:
+                if not table:
+                    if page == 1:
                         print("Error scraping {}".format(card))
+                        errCount+=1
+                    break
+
+                for row in table.find_all('tr'):
+                    cols = row.find_all('td')
+                    cols = [ele.text.strip() for ele in cols]
+
+                    if len(cols) > 0:
+                        try:
+                            if cols[shopname] in shops:
+                                key = romaji[cols[shopname]] + "_" + cols[lang]
+                                if key not in card_dict:                                                                    # Do not add duplicates (only add lowest price)
+                                    p = int(cols[price].split()[0].replace(',', ''))                                        # Remove yen sign and commas
+                                    card_dict[key] = p
+                        except:
+                            print("Error scraping {}".format(card))
+
+                # Check if there is a next page
+                next_link = soup.find('a', string='次へ')
+                # Only look at 1st page
+                if next_link and page < 1:
+                    page += 1
+                else:
+                    break
 
             try:
                 writer.writerow(card_dict)
